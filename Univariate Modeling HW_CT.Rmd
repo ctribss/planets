@@ -1,0 +1,302 @@
+---
+title: "R Univariate Models Homework 3"
+output:
+  html_document: default
+  pdf_document: default
+---
+Caroline Tribble
+
+```{r}
+#install.packages("ggplot2")       # for ggplot
+#install.packages("gridExtra")     # for grid.arrange to arrange ggplots
+#install.packages("scatterplot3d") # for scatterplot3d to make 3d graphic
+#install.packages("MASS")          # for stepAIC to automate model selection 
+
+library(ggplot2)
+library(gridExtra)
+library(scatterplot3d)
+library(MASS)
+```
+Read in tree data
+
+```{r}
+# read in directly from website: 
+trees <- read.csv('https://raw.githubusercontent.com/dmcglinn/quant_methods/gh-pages/data/treedata_subset.csv')
+```
+Examine this dataset and see how the data is structured, see function str
+
+```{r}
+str(trees)
+```
+1. Carry out an exploratory analysis using the tree dataset. Metadata for the tree study can be found here. Specifically, I would like you to develop and compare models for species cover for a habitat generalist Acer rubrum (Red maple) and a habitat specialist Abies fraseri (Frasier fir). Because this dataset includes both continuous and discrete explanatory variables use the function Anova in the package car. This will estimate partial effect sizes, variance explained, and p-values for each explanatory variable included in the model.
+
+  Compare the p-values you observe using the function Anova to those generated using summary.
+
+  For each species address the following additional questions:
+
+  a. How well does the exploratory model appear to explain cover?
+
+  b. Which explanatory variables are the most important?
+
+  c. Do model diagnostics indicate any problems with violations of OLS assumptions?
+
+```{r}
+# we wish to model species cover across all sampled plots
+# create site x sp matrix for two species 
+sp_cov = with(trees, tapply(cover, list(plotID, spcode), 
+                           function(x) round(mean(x))))
+sp_cov = ifelse(is.na(sp_cov), 0, sp_cov)
+sp_cov = data.frame(plotID = row.names(sp_cov), sp_cov)
+# create environmental matrix
+cols_to_select = c('elev', 'tci', 'streamdist', 'disturb', 'beers')
+env = aggregate(trees[ , cols_to_select], by = list(trees$plotID), 
+                function(x) x[1])
+names(env)[1] = 'plotID'
+# merge species and enviornmental matrices
+site_dat = merge(sp_cov, env, by='plotID')
+# subset species of interest
+abies = site_dat[ , c('ABIEFRA', cols_to_select)]
+acer  = site_dat[ , c('ACERRUB', cols_to_select)]
+names(abies)[1] = 'cover'
+names(acer)[1] = 'cover'
+```
+
+Frasier fir (Abies fraseri)
+```{r}
+par(mfrow=c(3,2))
+plot(cover ~ tci, data = abies)
+plot(cover ~ elev, data = abies)
+plot(cover ~ streamdist, data = abies)
+plot(cover ~ disturb, data = abies)
+plot(cover ~ beers, data = abies)
+```
+
+Looking at these plots showing the effect of site "water potential" (tci), elevation in meters (elev), distance in meters from nearest stream (streamdist), plot disturbance history (disturb), or heat load index (beers) on the local abundance as a percentage of horizontal cover (cover) of Frasier fir (Abies fraseri). Looking at these graphs it can be seen tci and elevation will be important factors to include in the model because cover shows a positive relationship with increasing elevation past >1500 meters and a negative relationship with increasing water site potential. Across all explanatory variables the response variable, cover of Frasier fir, is highly zero-inflated. This would make sense since we know this is a specialist species that appears to only occur at elevations >1500 meters and in areas with 0 - 15 tci. It is difficult to see any notable patterns in the effect of stream distance, disturbance, or heat load index on species cover and will be included in the model testing to be conservative.
+
+```{r}
+pairs(abies, panel= panel.smooth)
+```
+
+The pairs plot plots all the variables against one another. The first row of plots with the label 'cover' displays the effect of elev, tci, streamdist, disturb, and beers on species cover respectively. A line has also been fitted to each plot and it appears elevation has the strongest linear signal. The other plots show no linear relationship due to the large number of zeros in cover of frasier fir.
+
+
+Red Maple (Acer Rubrum)
+
+```{r}
+par(mfrow=c(3,2))
+plot(cover ~ tci, data = acer)
+plot(cover ~ elev, data = acer)
+plot(cover ~ streamdist, data = acer)
+plot(cover ~ disturb, data = acer)
+plot(cover ~ beers, data = acer)
+#lines(lowess(acer$beers,acer$cover), col ="red")
+```
+
+Similar to the plots above, we are observing the same effects on species cover for the red maple (Acer rubrum). 
+Looking at these graphs it can be seen tci and elevation again will be important factors to include in the model because cover shows a negative relationship with increasing elevation only past > 1550 meters and a negative relationship with increasing water site potential. Unlike frasier fir, cover of the red maple is much more widely distributed across each explanatory variable.  This would make sense since we know this is a generalist species. It is difficult to see any notable patterns in the effect of disturbanc or  heat load index on species cover and will be included in the model testing to be conservative.
+
+
+```{r}
+pairs(acer, panel= panel.smooth)
+```
+
+Similarly looking at the first row with the response variable cover it can be see elevation has the strongest signal and the other explanatory variables are a bit more difficult to interpret just looking at them.
+
+
+```{r}
+sapply(abies, class)
+```
+
+Histograms to see how the frequency of our response variable, cover, is distributed for each species. 
+```{r}
+par(mfrow= c(1,2))
+hist(abies$cover, breaks = seq(0,10, by =1), main = "Frasier Fir", xlab = "Species Cover")
+hist(acer$cover, breaks = seq(0,10, by =1), main = "Red Maple", xlab = "Species Cover")
+```
+
+These histograms show again that species cover of the specalist tree species, frasier fir, is highly zero-inflated, which makes sense since it appears this species is endemic to a certain level of high elevation (> 1500 meters). The generalist species, red maple, follows a more bimodal distribution in cover type displaying much more variation than the specialist species. 
+
+
+
+```{r}
+library(car)
+abies_mod <- aov(cover ~ elev + tci + streamdist + as.factor(disturb) + beers, data = abies)
+Anova(abies_mod, type = 3)
+summary(abies_mod)
+```
+```{r}
+abies2_mod <- aov(cover ~ elev + tci + streamdist + as.factor(disturb), data = abies)
+Anova(abies2_mod, type = 3)
+summary(abies2_mod)
+```
+```{r}
+abies3_mod <- aov(cover ~ elev + streamdist + as.factor(disturb), data = abies)
+Anova(abies3_mod, type = 3)
+summary(abies3_mod)
+```
+```{r}
+abies4_mod <- aov(cover ~ elev + as.factor(disturb), data = abies)
+Anova(abies4_mod, type = 3)
+summary(abies4_mod)
+```
+
+The steps above followed the model simplifcation process by trying to fit the maximal model and then simplifying by removing least significant terms and seeing how removal affects the variance and residual deviance of the model.
+
+The Anova tables provides the analysis of variance table including the degrees of freedom, sum of squares, mean squares, f value, and p-value. The summary function provides the coefficients table of linear models and reports the same p-values and f values as the anova table.
+
+```{r}
+par(mfrow=c(2,2))
+plot(abies_mod)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(abies2_mod)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(abies3_mod)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(abies4_mod)
+```
+
+In all the above plots if you focus on the residuals vs fitted and normal Q-Q plots, it can be seen that these data do not fit a normal distribution. For a normal distribution, the mean of the residuals vs fitted values is zero for homogeneity of variance and in the Q-Q plot the residuals would fit the line of linear fit well. Instead we see right skewness in both these graphs, likely due to the large number of zeros in cover. Thus the data does not adhere to OLS assumptions of a normal distribution and must be fitted to a different distribution or transformed to best understand the influence of each explanatory variable on frasier fir cover. Therefore, we cannot trust the p-values of significance in the above anovas run since the models disobey OLS assumptions. Since cover is zero-inflated can try a Poisson distribution to fit the model.
+
+```{r}
+abiesglm_mod <- glm(cover ~ elev + tci + streamdist + as.factor(disturb) + beers, family = 'poisson', data = abies)
+Anova(abiesglm_mod, type = 3)
+summary(abiesglm_mod)
+```
+
+In this model the explanatory variables elevation, water potential, stream distance, and disturbance history all have a significant effect on frasier fir cover. Elevation has the strongest effect on frasier fir cover folllowed by disturbance history (corporate logging being most significant), stream distance, and tci. This can be observed in the p-values (p<0.05 and the lower the more significant) and Chisq values (higher the more significant) for each explantory variable. 
+
+Heat load index (beers) does not appear to contribute much to the variance and will be taken out to test how it impacts the model.If removal of beers does not significantly impact the deviance of the model then it will remain removed.
+```{r}
+abies2glm_mod  <- glm(cover ~ elev + tci + streamdist + as.factor(disturb), family = 'poisson', data = abies)
+Anova(abiesglm_mod, type = 3)
+summary(abiesglm_mod)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(abiesglm_mod)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(abies2glm_mod)
+```
+
+When fitted to a poisson distribution using a general linear model, we see a great improvement in our residuals vs fitted values with the mean much closer to zero and the Q-Q plot closer to a linear relationship but still showing some leptokurtosis. The Poisson distribution models processes that produce few rare events and events must be independent of one another and generates integers 0 to positive infinity.
+
+
+Step Function: AIC Comparison
+
+```{r}
+step(abiesglm_mod)
+```
+
+The step function confirms variables of significance using AIC comparison. If it finds removing a variable significantly increases AIC then it should remain in the model, but if it has little effect and lowers the AIC value then it can be removed. Here we can see that heat load index did not significantly describe variance in species cover and when removed lowered the AIC value 2 points so it should remain out of the model.
+
+
+```{r}
+acer_mod <- aov(cover ~ tci + elev + streamdist + as.factor(disturb) + beers, data = acer)
+Anova(acer_mod, type = 3)
+summary(acer_mod)
+```
+
+Looking at the p-values (low) in the Anova table and the F value (high) it appears streamdist has the least significant effect and can be removed from the model. Disturbance is not significant but 0.07 is pretty close to the alpha value of 0.05 and thus may be significant with the right model.
+
+```{r}
+acer2_mod <- aov(cover ~ tci + elev + beers + as.factor(disturb), data = acer)
+Anova(acer2_mod, type = 3)
+summary(acer2_mod)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(acer_mod)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(acer2_mod)
+```
+
+Fits a normal distribution well and OLS assumptions looking at these plots but we are treating cover as a continuous variable when it is discrete and we also are losing the different levels of disturbance history in understanding this model. Next will try to fit to a general linear model with a gaussian distribution.
+```{r}
+acerglm_mod <- glm(cover ~ elev + tci + streamdist + as.factor(disturb) + beers, family = 'gaussian', data = acer)
+Anova(acerglm_mod,type = 3)
+summary(acerglm_mod)
+```
+
+In this model the explanatory variables elevation, tci, beers, and disturbance history all have a significant effect on red maple cover. Elevation has the strongest effect on red maple cover folllowed by tci, heat load index (beers), and disturbance history (corporate logging being most significant). This can be observed in the p-values (p<0.05 and the lower the more significant) and Likelihood ratio (LR) Chisquare values (higher the more significant) for each explantory variable. 
+
+Stream distance does not appear to contribute much to the variance and will be taken out to test how it impacts the model. If removal of stream distance does not significantly impact the deviance of the model then it will remain removed.
+```{r}
+par(mfrow=c(2,2))
+plot(acerglm_mod)
+```
+```{r}
+acer2glm_mod <- glm(cover ~ tci + elev + as.factor(disturb) + beers, family = 'gaussian', data = acer)
+Anova(acer2glm_mod,type = 3)
+summary(acer2glm_mod)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(acer2glm_mod)
+```
+
+We can see that Red Maple fits a normal glm distribution well since in the residuals vs fitted values the residual mean is close to zero representing homoegeneity of variance and in the Q-Q plot the residuals fit the linear regression very well. Thus the data adheres to OLS assumptions of a normal distribution. 
+
+```{r}
+acer3glm_mod <- glm(cover ~ tci + elev + beers + as.factor(disturb), family = 'poisson', data = acer)
+Anova(acer2glm_mod,type = 3)
+summary(acer3glm_mod)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(acer3glm_mod)
+```
+
+Shows Poisson distribution does not fit species cover for the Red Maple well and a Gaussian (normal) distribution is more appropriate.
+
+```{r}
+step(acerglm_mod)
+```
+
+The step function confirms variables of significance using AIC comparison. If it finds removing a variable significantly increases AIC then it should remain in the model, but if it has little effect and lowers the AIC value then it can be removed. Here we can see that stream distance did not significantly describe deviance in species cover and when removed lowered the AIC value 0.3 so cover is best described without it.
+
+
+
+Are you able to explain variance in one species better than another, why might this be the case?
+
+
+```{r}
+#2\. You may have noticed that the variable cover is defined as 
+#positive integers between 1 and 10. and is therefore better treated
+#as a discrete rather than continuous variable. 
+#Re-examine your solutions to the question above but from the
+#perspective of a General Linear Model (GLM) with a Poisson error term
+#(rather than a Gaussian one as in OLS). 
+#The Poisson distribution generates integers 0 to positive infinity so this may provide a good first approximation. 
+#Your new model calls will look as follows:
+
+#acer_poi = glm(cover ~ tci + elev + ... , data = my_data, 
+           #family='poisson')
+```
+^^Did this step above in model testing for each species^^
+
+2. Compare your qualatitive assessment of which variables were most important in each model. Does it appear that changing the error distribution changed the results much? In what ways?
+
+
+For both species elevation had the most significant effect on their cover and was most important in the model. Both species cover were also significantly effected by site water potential (tci) and plot disturbance history with corporate logging sites the most significant type. Dissimilarly, the frasier fir model was best explained with stream distance and without heat load index while red maple was the opposite. This could be due to these species differing preffered climates where heat load index at very high elevations that are cooler may be less important while stream distance is due to the harsher climate and limited natural resources. For the generalist species, stream distance may be less important than heat load index because this particular species may be better adapted to drought conditions than large drops or peaks in temperature.
+
+
+3. Provide a plain English summary (i.e., no statistics) of what you have found and what conclusions we can take away from your analysis?
+
+
+Frasier fir is a specialist species that occurs at elevations greater than 1500 meters. In addition to elevation, the distribution of this species is also influenced by a site's water potential (tci), the disturbance history of the plot, and the distance of the plot from the closest stream. Heat load index of a plot does not influence the cover of frasier fir. The red maple is a generalist species that occurs at elevtaions below 1500 meters and the species cover is influenced by tci, the disturbance history, and the heat load index of the plot. The distance to the closest stream does not have an impact on the cover of red maples in an area. 
+
+
+
+
